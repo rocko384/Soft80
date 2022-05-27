@@ -74,25 +74,74 @@ void Soft80::kill() {
 void Soft80::executor() {
 	while (!should_executor_exit) {
 
+		if (read_reset()) {
+			wait_next_clock();
+
+			busack = false;
+			halt = false;
+			iorq = false;
+			m1 = false;
+			mreq = false;
+			rd = false;
+			wr = false;
+			rfsh = false;
+
+			wait_next_clock();
+			wait_next_clock();
+
+			if (read_reset()) {
+				iff1 = false;
+				registers.PC = 0;
+				registers.I = 0;
+				registers.R = 0;
+				interrupt_mode = 0;
+			}
+		}
+		
 		if (!halt) {
-			fetch_opcode();
+			fetch_opcode(int_response);
 		}
 		else {
 			wait_next_clock();
+
+			iorq = false;
+			m1 = true;
+			mreq = false;
+			rd = false;
+			wr = false;
+			rfsh = false;
+
 			wait_next_clock();
 			wait_next_clock();
+
+			m1 = false;
+
 			wait_next_clock();
+
 			current_instruction = Instruction{};
 		}
 
 		if (current_instruction) {
+			int_response = false;
+
 			execute_instruction();
+
+			if (read_nmi() || nmi_latch) {
+				nmi_latch = false;
+
+				nmi_acknowledge();
+			}
+
+			if (read_int() && iff1) {
+				int_acknowledge();
+			}
 		}
+
 	}
 }
 
 void Soft80::wait_next_clock() {
-	while (!should_cycle) {
+	while (!should_cycle || read_wait()) {
 		if (should_executor_exit) {
 			exit(0);
 		}
@@ -103,8 +152,10 @@ void Soft80::wait_next_clock() {
 	should_cycle = false;
 }
 
-void Soft80::fetch_opcode() {
+void Soft80::fetch_opcode(bool is_int) {
 	wait_next_clock();
+
+	update_m_cycle(M_Cycles::OpcodeFetch);
 
 	iorq = false;
 	m1 = true;
@@ -142,13 +193,21 @@ void Soft80::fetch_opcode() {
 
 	uint8_t read_byte = memory.read(registers.PC);
 
+	if (is_int) {
+		read_byte = data_bus;
+	}
+
 	current_instruction = decoder.decode(read_byte);
 
-	registers.PC++;
+	if (!is_int) {
+		registers.PC++;
+	}
 }
 
 uint8_t Soft80::read_memory(uint16_t address) {
 	wait_next_clock();
+
+	update_m_cycle(M_Cycles::MemRead);
 
 	address_bus = address;
 
@@ -183,6 +242,8 @@ uint8_t Soft80::read_memory(uint16_t address) {
 void Soft80::write_memory(uint16_t address, uint8_t value) {
 	wait_next_clock();
 
+	update_m_cycle(M_Cycles::MemWrite);
+
 	address_bus = address;
 	data_bus = value;
 
@@ -216,6 +277,8 @@ void Soft80::write_memory(uint16_t address, uint8_t value) {
 
 uint8_t Soft80::read_io(uint8_t port_lo, uint8_t port_hi) {
 	wait_next_clock();
+
+	update_m_cycle(M_Cycles::IORead);
 
 	address_bus = (static_cast<uint16_t>(port_hi) << 8) | port_lo;
 
@@ -258,6 +321,8 @@ uint8_t Soft80::read_io(uint8_t port_lo, uint8_t port_hi) {
 
 void Soft80::write_io(uint8_t port_lo, uint8_t port_hi, uint8_t value) {
 	wait_next_clock();
+
+	update_m_cycle(M_Cycles::IOWrite);
 
 	address_bus = (static_cast<uint16_t>(port_hi) << 8) | port_lo;
 	data_bus = value;
@@ -307,7 +372,11 @@ void Soft80::bus_acknowledge() {
 
 	busack = true;
 
-	while (*busreq_source) {
+	while (read_busreq()) {
+		if (read_nmi()) {
+			nmi_latch = true;
+		}
+
 		wait_next_clock();
 	}
 
@@ -315,11 +384,67 @@ void Soft80::bus_acknowledge() {
 }
 
 void Soft80::int_acknowledge() {
+	wait_next_clock();
 
+	iff1 = false;
+	iff2 = false;
+	
+	switch (interrupt_mode) {
+	case 0:
+		int_response = true;
+		break;
+	case 1:
+	{
+		uint8_t PC_high = (registers.PC & 0xFF00) >> 8;
+		uint8_t PC_low = registers.PC & 0x00FF;
+
+		registers.SP--;
+		write_memory(registers.SP, PC_high);
+		registers.SP--;
+		write_memory(registers.SP, PC_low);
+
+		registers.PC = 0x0038;
+
+		break;
+	}
+	case 2: {
+		uint16_t vector = data_bus;
+
+		uint8_t PC_high = (registers.PC & 0xFF00) >> 8;
+		uint8_t PC_low = registers.PC & 0x00FF;
+
+		registers.SP--;
+		write_memory(registers.SP, PC_high);
+		registers.SP--;
+		write_memory(registers.SP, PC_low);
+
+		uint16_t I = registers.I;
+
+		uint16_t addr_low = read_memory((I << 8) | vector);
+		uint16_t addr_high = read_memory((I << 8) | (vector + 1));
+
+		registers.PC = (addr_high << 8) | addr_low;
+
+		break;
+	}
+	}
 }
 
 void Soft80::nmi_acknowledge() {
+	wait_next_clock();
 
+	iff2 = iff1;
+	iff1 = false;
+
+	uint8_t PC_high = (registers.PC & 0xFF00) >> 8;
+	uint8_t PC_low = registers.PC & 0x00FF;
+
+	registers.SP--;
+	write_memory(registers.SP, PC_high);
+	registers.SP--;
+	write_memory(registers.SP, PC_low);
+
+	registers.PC = 0x0066;
 }
 
 void Soft80::execute_instruction() {
@@ -2224,4 +2349,53 @@ void Soft80::execute_instruction() {
 		}
 	}
 
+	current_instruction = std::nullopt;
+}
+
+void Soft80::update_m_cycle(M_Cycles next_cycle) {
+	if (read_busreq()) {
+		bus_acknowledge();
+	}
+
+	current_m_cycle = next_cycle;
+}
+
+bool Soft80::read_busreq() {
+	if (busreq_source != nullptr) {
+		return *busreq_source;
+	}
+
+	return false;
+}
+
+bool Soft80::read_int() {
+	if (int_source != nullptr) {
+		return *int_source;
+	}
+
+	return false;
+}
+
+bool Soft80::read_nmi() {
+	if (nmi_source != nullptr) {
+		return *nmi_source;
+	}
+
+	return false;
+}
+
+bool Soft80::read_reset() {
+	if (reset_source != nullptr) {
+		return *reset_source;
+	}
+
+	return false;
+}
+
+bool Soft80::read_wait() {
+	if (wait_source != nullptr) {
+		return *wait_source;
+	}
+
+	return false;
 }

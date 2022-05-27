@@ -41,6 +41,9 @@ public:
 	MemoryMap memory;
 	DeviceMap devices;
 
+	uint8_t data_bus;
+	uint16_t address_bus;
+
 private:
 
 	std::atomic<bool> should_cycle{ false };
@@ -49,7 +52,7 @@ private:
 	void executor();
 	void wait_next_clock();
 
-	void fetch_opcode();
+	void fetch_opcode(bool is_int = false);
 	uint8_t read_memory(uint16_t address);
 	void write_memory(uint16_t address, uint8_t value);
 	uint8_t read_io(uint8_t port_lo, uint8_t port_hi);
@@ -82,8 +85,7 @@ private:
 
 	M_Cycles current_m_cycle{ M_Cycles::OpcodeFetch };
 
-	uint8_t data_bus;
-	uint16_t address_bus;
+	void update_m_cycle(M_Cycles next_cycle);
 
 	bool busack{ false };
 	bool halt{ false };
@@ -97,7 +99,16 @@ private:
 	bool iff1{ false };
 	bool iff2{ false };
 
+	bool nmi_latch{ false };
+	bool int_response{ false };
+
 	size_t interrupt_mode{ 0 };
+
+	bool read_busreq();
+	bool read_int();
+	bool read_nmi();
+	bool read_reset();
+	bool read_wait();
 
 	bool* busreq_source{ nullptr };
 	bool* int_source{ nullptr };
