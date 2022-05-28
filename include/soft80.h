@@ -8,6 +8,7 @@
 #include <optional>
 #include <functional>
 #include <vector>
+#include <stack>
 #include <thread>
 #include <atomic>
 #include <cstdint>
@@ -29,10 +30,11 @@ public:
 	bool read_rfsh();
 
 	void set_busreq_source(bool& b);
-	void set_int_source(bool& b);
-	void set_nmi_source(bool& b);
 	void set_reset_source(bool& b);
 	void set_wait_source(bool& b);
+
+	void signal_int();
+	void signal_nmi();
 
 	void cycle_clock();
 
@@ -62,6 +64,8 @@ private:
 	void nmi_acknowledge();
 
 	std::thread execution_thread;
+
+	std::stack<Instruction> instruction_history;
 
 	void execute_instruction();
 
@@ -99,20 +103,18 @@ private:
 	bool iff1{ false };
 	bool iff2{ false };
 
-	bool nmi_latch{ false };
+	std::atomic<bool> nmi_latch{ false };
+	std::atomic<bool> int_latch{ false };
+
 	bool int_response{ false };
 
 	size_t interrupt_mode{ 0 };
 
 	bool read_busreq();
-	bool read_int();
-	bool read_nmi();
 	bool read_reset();
 	bool read_wait();
 
 	bool* busreq_source{ nullptr };
-	bool* int_source{ nullptr };
-	bool* nmi_source{ nullptr };
 	bool* reset_source{ nullptr };
 	bool* wait_source{ nullptr };
 

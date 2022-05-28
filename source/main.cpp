@@ -12,9 +12,9 @@ int main(int argc, char** argv) {
 
 	MemoryMap map;
 
-	ROM<8192> rom = load_ROM_from_file<8192>("tests/hello.bin");
+	ROM<8192> rom = load_ROM_from_file<8192>("tests/nmi_tty.bin");
 	RAM<57344> ram;
-	TerminalDevice term;
+	NMITerminalDevice term;
 
 	Soft80 zcpu;
 
@@ -22,6 +22,8 @@ int main(int argc, char** argv) {
 	zcpu.memory.add_mapping(ram, 8192, 65535);
 
 	zcpu.devices.add_mapping(term, 80);
+
+	term.connect(zcpu);
 
 	auto start = std::chrono::steady_clock::now();
 
@@ -33,6 +35,7 @@ int main(int argc, char** argv) {
 			start = now;
 		
 			zcpu.cycle_clock();
+			term.cycle_clock();
 		}
 	}
 

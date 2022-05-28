@@ -5,6 +5,7 @@ Soft80::Soft80() {
 }
 
 Soft80::~Soft80() {
+	should_executor_exit = true;
 	execution_thread.join();
 }
 
@@ -44,20 +45,20 @@ void Soft80::set_busreq_source(bool& b) {
 	busreq_source = &b;
 }
 
-void Soft80::set_int_source(bool& b) {
-	int_source = &b;
-}
-
-void Soft80::set_nmi_source(bool& b) {
-	nmi_source = &b;
-}
-
 void Soft80::set_reset_source(bool& b) {
 	reset_source = &b;
 }
 
 void Soft80::set_wait_source(bool& b) {
 	wait_source = &b;
+}
+
+void Soft80::signal_int() {
+	int_latch = true;
+}
+
+void Soft80::signal_nmi() {
+	nmi_latch = true;
 }
 
 void Soft80::cycle_clock() {
@@ -124,15 +125,21 @@ void Soft80::executor() {
 		if (current_instruction) {
 			int_response = false;
 
+			if (current_instruction->name != Instruction::Names::NOP) {
+				instruction_history.push(current_instruction.value());
+			}
+
 			execute_instruction();
 
-			if (read_nmi() || nmi_latch) {
+			if (nmi_latch) {
 				nmi_latch = false;
 
 				nmi_acknowledge();
 			}
 
-			if (read_int() && iff1) {
+			if (int_latch && iff1) {
+				int_latch = false;
+
 				int_acknowledge();
 			}
 		}
@@ -373,10 +380,6 @@ void Soft80::bus_acknowledge() {
 	busack = true;
 
 	while (read_busreq()) {
-		if (read_nmi()) {
-			nmi_latch = true;
-		}
-
 		wait_next_clock();
 	}
 
@@ -385,6 +388,8 @@ void Soft80::bus_acknowledge() {
 
 void Soft80::int_acknowledge() {
 	wait_next_clock();
+
+	halt = false;
 
 	iff1 = false;
 	iff2 = false;
@@ -407,7 +412,8 @@ void Soft80::int_acknowledge() {
 
 		break;
 	}
-	case 2: {
+	case 2:
+	{
 		uint16_t vector = data_bus;
 
 		uint8_t PC_high = (registers.PC & 0xFF00) >> 8;
@@ -432,6 +438,8 @@ void Soft80::int_acknowledge() {
 
 void Soft80::nmi_acknowledge() {
 	wait_next_clock();
+
+	halt = false;
 
 	iff2 = iff1;
 	iff1 = false;
@@ -982,7 +990,6 @@ void Soft80::execute_instruction() {
 
 	case Instruction::Names::IN:
 	{
-		is_io = true;
 
 		uint8_t low = registers.main.C;
 		uint8_t high = registers.main.B;
@@ -1420,7 +1427,7 @@ void Soft80::execute_instruction() {
 			high = registers.main.A;
 		}
 
-		write_io(low, high, registers.main.A);
+		write_io(low, high, operand2);
 
 		break;
 	}
@@ -2363,22 +2370,6 @@ void Soft80::update_m_cycle(M_Cycles next_cycle) {
 bool Soft80::read_busreq() {
 	if (busreq_source != nullptr) {
 		return *busreq_source;
-	}
-
-	return false;
-}
-
-bool Soft80::read_int() {
-	if (int_source != nullptr) {
-		return *int_source;
-	}
-
-	return false;
-}
-
-bool Soft80::read_nmi() {
-	if (nmi_source != nullptr) {
-		return *nmi_source;
 	}
 
 	return false;
