@@ -21,7 +21,8 @@ set(SOURCE
 	"include/util.h"
 	"source/util.cpp"
 	"include/terminaldevice.h"
-  )
+	"include/interruptingdevice.h"
+)
 
 add_executable (${PROJECT_NAME} ${SOURCE})
 
