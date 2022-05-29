@@ -41,16 +41,16 @@ bool Soft80::read_rfsh() {
 	return rfsh;
 }
 
-void Soft80::set_busreq_source(bool& b) {
-	busreq_source = &b;
+void Soft80::add_busreq_source(bool& b) {
+	busreq_sources.push_back(&b);
 }
 
-void Soft80::set_reset_source(bool& b) {
-	reset_source = &b;
+void Soft80::add_reset_source(bool& b) {
+	reset_sources.push_back(&b);
 }
 
-void Soft80::set_wait_source(bool& b) {
-	wait_source = &b;
+void Soft80::add_wait_source(bool& b) {
+	wait_sources.push_back(&b);
 }
 
 void Soft80::signal_int() {
@@ -100,7 +100,7 @@ void Soft80::executor() {
 		}
 		
 		if (!halt) {
-			fetch_opcode(int_response);
+			fetch_opcode();
 		}
 		else {
 			wait_next_clock();
@@ -159,56 +159,65 @@ void Soft80::wait_next_clock() {
 	should_cycle = false;
 }
 
-void Soft80::fetch_opcode(bool is_int) {
+void Soft80::fetch_opcode() {
 	wait_next_clock();
 
-	update_m_cycle(M_Cycles::OpcodeFetch);
+	if (!int_response) {
+		update_m_cycle(M_Cycles::OpcodeFetch);
+	}
 
-	iorq = false;
-	m1 = true;
-	mreq = true;
-	rd = true;
-	wr = false;
-	rfsh = false;
+	uint8_t read_byte = 0;
 
-	wait_next_clock();
+	if (int_vector) {
+		read_byte = int_vector.value();
+		int_vector = std::nullopt;
+	}
+	else {
+		iorq = false;
+		m1 = true;
+		mreq = true;
+		rd = true;
+		wr = false;
+		rfsh = false;
 
-	iorq = false;
-	m1 = true;
-	mreq = true;
-	rd = true;
-	wr = false;
-	rfsh = false;
+		wait_next_clock();
 
-	wait_next_clock();
+		iorq = false;
+		m1 = true;
+		mreq = true;
+		rd = true;
+		wr = false;
+		rfsh = false;
 
-	iorq = false;
-	m1 = false;
-	mreq = true;
-	rd = false;
-	wr = false;
-	rfsh = true;
+		read_byte = memory.read(registers.PC);
 
-	wait_next_clock();
+		if (int_response) {
+			read_byte = data_bus;
+		}
+		else {
+			registers.PC++;
+		}
 
-	iorq = false;
-	m1 = false;
-	mreq = true;
-	rd = false;
-	wr = false;
-	rfsh = true;
+		wait_next_clock();
 
-	uint8_t read_byte = memory.read(registers.PC);
+		iorq = false;
+		m1 = false;
+		mreq = true;
+		rd = false;
+		wr = false;
+		rfsh = true;
 
-	if (is_int) {
-		read_byte = data_bus;
+		wait_next_clock();
+
+		iorq = false;
+		m1 = false;
+		mreq = true;
+		rd = false;
+		wr = false;
+		rfsh = true;
 	}
 
 	current_instruction = decoder.decode(read_byte);
-
-	if (!is_int) {
-		registers.PC++;
-	}
 }
 
 uint8_t Soft80::read_memory(uint16_t address) {
@@ -389,14 +398,32 @@ void Soft80::bus_acknowledge() {
 void Soft80::int_acknowledge() {
 	wait_next_clock();
 
+	update_m_cycle(M_Cycles::IntAck);
+
 	halt = false;
 
 	iff1 = false;
 	iff2 = false;
+
+	m1 = true;
+
+	wait_next_clock();
+	wait_next_clock();
+
+	iorq = true;
+
+	wait_next_clock();
+	wait_next_clock();
+
+	uint16_t vector = data_bus;
+
+	m1 = false;
+	iorq = false;
 	
 	switch (interrupt_mode) {
 	case 0:
 		int_response = true;
+		int_vector = vector;
 		break;
 	case 1:
 	{
@@ -414,7 +441,6 @@ void Soft80::int_acknowledge() {
 	}
 	case 2:
 	{
-		uint16_t vector = data_bus;
 
 		uint8_t PC_high = (registers.PC & 0xFF00) >> 8;
 		uint8_t PC_low = registers.PC & 0x00FF;
@@ -426,8 +452,11 @@ void Soft80::int_acknowledge() {
 
 		uint16_t I = registers.I;
 
-		uint16_t addr_low = read_memory((I << 8) | vector);
-		uint16_t addr_high = read_memory((I << 8) | (vector + 1));
+		uint16_t vector_low = (I << 8) | vector;
+		uint16_t vector_high = (I << 8) | (vector + 1);
+
+		uint16_t addr_low = read_memory(vector_low);
+		uint16_t addr_high = read_memory(vector_high);
 
 		registers.PC = (addr_high << 8) | addr_low;
 
@@ -438,6 +467,8 @@ void Soft80::int_acknowledge() {
 
 void Soft80::nmi_acknowledge() {
 	wait_next_clock();
+
+	update_m_cycle(M_Cycles::IntAck);
 
 	halt = false;
 
@@ -1817,7 +1848,7 @@ void Soft80::execute_instruction() {
 		registers.SP--;
 		write_memory(registers.SP, low);
 
-		registers.SP = current_instruction->imm * 8;
+		registers.PC = current_instruction->imm;
 
 		break;
 	}
@@ -2368,24 +2399,30 @@ void Soft80::update_m_cycle(M_Cycles next_cycle) {
 }
 
 bool Soft80::read_busreq() {
-	if (busreq_source != nullptr) {
-		return *busreq_source;
+	for (auto b : busreq_sources) {
+		if (*b) {
+			return true;
+		}
 	}
 
 	return false;
 }
 
 bool Soft80::read_reset() {
-	if (reset_source != nullptr) {
-		return *reset_source;
+	for (auto b : reset_sources) {
+		if (*b) {
+			return true;
+		}
 	}
 
 	return false;
 }
 
 bool Soft80::read_wait() {
-	if (wait_source != nullptr) {
-		return *wait_source;
+	for (auto b : wait_sources) {
+		if (*b) {
+			return true;
+		}
 	}
 
 	return false;

@@ -1,9 +1,11 @@
-#define NMI_PAD .defs $0066 - $, 0
+#define INT_PAD .defs $0038 - $, 0
 #define IN_BUF_BEGIN $2000
 #define IN_BUF_END $2100
 
 MAIN:
 	LD SP, $FFFF
+    EI
+	IM 1
 
 	LD HL, TEXT
     CALL STRLEN
@@ -25,14 +27,14 @@ MAIN:
     
     HALT
 	
-NMI_PAD
+INT_PAD
 
-NMI:
+INT:
 	LD C, 80
 	IN B, (C)
     LD HL, IN_BUF_BEGIN
     INIR
-	RETN
+	RETI
 
 STRLEN:
 	LD A, 0

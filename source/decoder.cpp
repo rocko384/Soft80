@@ -740,6 +740,10 @@ std::optional<Instruction> Decoder::decode_ED(uint8_t b) {
 	needs_displacement = details.needs_displacement;
 	immediate_bytes = details.immediate_bytes;
 
+	if (immediate_bytes == 0) {
+		ret.imm = details.immediate_value;
+	}
+
 	prefix = 0;
 
 	if (needs_displacement || immediate_bytes > 0) {

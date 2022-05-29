@@ -12,9 +12,9 @@ int main(int argc, char** argv) {
 
 	MemoryMap map;
 
-	ROM<8192> rom = load_ROM_from_file<8192>("tests/nmi_tty.bin");
+	ROM<8192> rom = load_ROM_from_file<8192>("tests/int2_tty.bin");
 	RAM<57344> ram;
-	NMITerminalDevice term;
+	INT2TerminalDevice term;
 
 	Soft80 zcpu;
 

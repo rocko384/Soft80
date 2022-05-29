@@ -29,9 +29,9 @@ public:
 	bool read_wr();
 	bool read_rfsh();
 
-	void set_busreq_source(bool& b);
-	void set_reset_source(bool& b);
-	void set_wait_source(bool& b);
+	void add_busreq_source(bool& b);
+	void add_reset_source(bool& b);
+	void add_wait_source(bool& b);
 
 	void signal_int();
 	void signal_nmi();
@@ -54,7 +54,7 @@ private:
 	void executor();
 	void wait_next_clock();
 
-	void fetch_opcode(bool is_int = false);
+	void fetch_opcode();
 	uint8_t read_memory(uint16_t address);
 	void write_memory(uint16_t address, uint8_t value);
 	uint8_t read_io(uint8_t port_lo, uint8_t port_hi);
@@ -107,6 +107,7 @@ private:
 	std::atomic<bool> int_latch{ false };
 
 	bool int_response{ false };
+	std::optional<uint8_t> int_vector{ std::nullopt };
 
 	size_t interrupt_mode{ 0 };
 
@@ -114,8 +115,8 @@ private:
 	bool read_reset();
 	bool read_wait();
 
-	bool* busreq_source{ nullptr };
-	bool* reset_source{ nullptr };
-	bool* wait_source{ nullptr };
+	std::vector<bool*> busreq_sources;
+	std::vector<bool*> reset_sources;
+	std::vector<bool*> wait_sources;
 
 };

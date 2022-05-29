@@ -1,9 +1,13 @@
-#define NMI_PAD .defs $0066 - $, 0
+#define INT_TABLE_PAD .defs $1F00 - $, 0
 #define IN_BUF_BEGIN $2000
 #define IN_BUF_END $2100
 
 MAIN:
 	LD SP, $FFFF
+    LD A, INT_TABLE >> 8
+    LD I, A
+	IM 2
+    EI
 
 	LD HL, TEXT
     CALL STRLEN
@@ -23,16 +27,26 @@ MAIN:
     LD B, A
     CALL PRINT
     
-    HALT
-	
-NMI_PAD
+    EI
+    
+    JP STOP
 
-NMI:
+INT0:
 	LD C, 80
 	IN B, (C)
     LD HL, IN_BUF_BEGIN
     INIR
-	RETN
+	RETI
+
+INT1:
+	LD HL, TEXT2
+    CALL STRLEN
+    
+    LD HL, TEXT2
+    LD B, A
+    CALL PRINT
+    
+    RETI
 
 STRLEN:
 	LD A, 0
@@ -52,7 +66,19 @@ REQ_READ:
     LD B, $FF
     OUT (C), B
     RET
-    
+
+STOP:
+	HALT
+    JP STOP
+
 TEXT:
 	.db "Hello, world!\n", 0
-    
+
+TEXT2:
+	.db "Interrupt!\n", 0
+
+INT_TABLE_PAD
+
+INT_TABLE:
+	.dw INT0
+    .dw INT1
